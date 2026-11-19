@@ -3,7 +3,7 @@ from typing import Any
 
 from pymongo import MongoClient
 from pymongo.database import Database
-from pymongo.errors import PyMongoError
+from pymongo.errors import ConfigurationError, PyMongoError
 
 from app.core.config import get_settings
 
@@ -35,6 +35,12 @@ def mongo_health() -> dict[str, Any]:
     try:
         get_client().admin.command("ping")
         return {"configured": True, "connected": True, "message": "MongoDB Atlas connection succeeded."}
+    except ConfigurationError:
+        return {
+            "configured": True,
+            "connected": False,
+            "message": "MongoDB connection settings are invalid or the Atlas cluster address cannot be resolved.",
+        }
     except (PyMongoError, RuntimeError):
         # Avoid returning driver details that could disclose connection context.
         return {"configured": True, "connected": False, "message": "MongoDB is unreachable or credentials are invalid."}

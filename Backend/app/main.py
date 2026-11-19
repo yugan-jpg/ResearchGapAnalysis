@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
+from app.api.routes.papers import router as papers_router
 from app.core.config import get_settings
 from app.db.indexes import initialize_database
 from app.db.mongodb import close_mongo_client, get_database
@@ -31,6 +32,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 app.include_router(health_router, prefix=settings.api_prefix)
+app.include_router(papers_router, prefix=settings.api_prefix)
 
 
 @app.get("/", tags=["system"], include_in_schema=False)

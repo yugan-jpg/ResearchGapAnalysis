@@ -10,6 +10,7 @@ from pymongo.errors import CollectionInvalid
 COLLECTIONS = (
     "papers",
     "document_chunks",
+    "paper_chunks",
     "processing_jobs",
     "claims",
     "contradictions",
@@ -38,6 +39,8 @@ def initialize_database(database: Database) -> dict[str, object]:
     database.papers.create_index([("metadata.doi", ASCENDING)], name="paper_doi", sparse=True)
     database.papers.create_index([("content_sha256", ASCENDING)], name="paper_content_hash", unique=True, sparse=True)
     database.document_chunks.create_index([("paper_id", ASCENDING), ("chunk_index", ASCENDING)], name="chunk_paper_position", unique=True)
+    database.paper_chunks.create_index([("chunk_id", ASCENDING)], name="paper_chunk_id", unique=True)
+    database.paper_chunks.create_index([("paper_id", ASCENDING), ("chunk_index", ASCENDING)], name="paper_chunk_position", unique=True)
     database.processing_jobs.create_index([("paper_id", ASCENDING), ("created_at", DESCENDING)], name="job_paper_created")
     database.processing_jobs.create_index([("status", ASCENDING), ("updated_at", DESCENDING)], name="job_status_updated")
     database.claims.create_index([("paper_id", ASCENDING), ("created_at", DESCENDING)], name="claim_paper_created")

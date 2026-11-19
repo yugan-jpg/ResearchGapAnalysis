@@ -1,14 +1,19 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     """Runtime configuration loaded from environment variables or `.env`."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Resolve independently of the command's working directory.
+        env_file=BACKEND_DIRECTORY / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -16,13 +21,16 @@ class Settings(BaseSettings):
 
     mongodb_uri: str = Field(default="", description="MongoDB Atlas connection string")
     mongodb_database: str = Field(default="scientific_literature_gap_discovery")
-    llm_api_key: str = Field(default="", repr=False)
+    llm_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
     llm_model_name: str = Field(default="")
     frontend_url: str = Field(default="http://localhost:5173")
     auto_initialize_database: bool = Field(default=False)
     app_name: str = Field(default="Scientific Literature Gap Discovery API")
     api_prefix: str = Field(default="/api")
     mongodb_timeout_ms: int = Field(default=5_000, ge=1_000, le=30_000)
+    pdf_max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1_024, le=100 * 1024 * 1024)
+    pdf_chunk_size: int = Field(default=1_200, ge=200, le=5_000)
+    pdf_chunk_overlap: int = Field(default=200, ge=0, le=2_500)
 
 
 @lru_cache

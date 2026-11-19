@@ -37,15 +37,17 @@ npm run preview
 
 Optional: copy `.env.example` to `.env`, set `VITE_API_BASE_URL` to your FastAPI service, then restart the dev server.
 
-## Proposed API contract — routes are not assumed to exist
+## Confirmed paper API contract
 
-All paths are centralised in `src/config/api.js`.
+All paths are centralised in `src/config/api.js`. The analysis route remains configurable for a later backend phase.
 
-| Operation | Proposed request | Proposed response |
+| Operation | Request | Successful response |
 | --- | --- | --- |
-| List papers | `GET /api/papers` | `{ "papers": [Paper] }` |
-| Upload PDFs | `POST /api/papers`, multipart field `files` | `{ "papers": [Paper] }` |
-| Analyze | `POST /api/analysis`, `{ "question": "...", "paper_ids": ["..."] }` | `AnalysisResponse` |
+| List papers | `GET /api/papers` | `{ "papers": [Paper], "total": 0, "skip": 0, "limit": 20 }` |
+| Upload one PDF | `POST /api/papers/upload`, multipart field `file` | `PaperUploadResponse` |
+| Analyze | `POST /api/analysis`, `{ "question": "...", "paper_ids": ["..."] }` | `AnalysisResponse` when implemented |
+
+When multiple PDFs are selected, the frontend sends one request per PDF to the single-file upload endpoint and keeps completed uploads visible if a later file fails.
 
 `Paper` should include `id`, `filename` or `title`, `status` (`queued`, `processing`, `ready`, or `failed`), and optional `authors`, `year`, `pages`. The frontend accepts FastAPI `{ "detail": "..." }` errors or `{ "message": "..." }` errors.
 

@@ -1,6 +1,6 @@
 # Phase 1 — Backend foundation
 
-This lightweight FastAPI foundation is intentionally limited to configuration, MongoDB Atlas connectivity, initial collection/index preparation, CORS, and a health route. It does **not** process PDFs, call an LLM, generate embeddings, run vector search, or perform research-gap analysis.
+Phase 2 adds text-based scientific PDF ingestion to the existing FastAPI foundation. It validates one upload at a time, extracts per-page text with PyMuPDF, creates page-aware text chunks, and stores metadata and chunks in MongoDB Atlas. It does **not** call an LLM, generate embeddings, run vector search, or perform research-gap analysis.
 
 ## Structure
 
@@ -13,8 +13,10 @@ Backend/
 │   ├── main.py                    # FastAPI app, lifespan, CORS
 │   ├── core/config.py             # Environment variables
 │   ├── api/routes/health.py       # GET /api/health
+│   ├── api/routes/papers.py       # PDF upload, paper lookup, paper list
 │   ├── db/mongodb.py              # Lazy PyMongo Atlas client
 │   ├── db/indexes.py              # Initial collections/indexes
+│   ├── modules/pdf_processing/    # Validation, extraction, chunking, storage
 │   ├── schemas/health.py
 │   └── modules/                   # Empty boundaries for later phases
 │       ├── pdf_processing/
@@ -26,6 +28,7 @@ Backend/
 │       ├── devils_advocate/
 │       └── research_gap_ranking/
 └── scripts/initialize_database.py
+└── tests/                          # Isolated PyMuPDF/mongomock tests
 ```
 
 ## Configuration
@@ -64,6 +67,24 @@ Invoke-WebRequest -Method Options -Uri http://127.0.0.1:8000/api/health -Headers
 ```
 
 A configured Atlas instance returns `status: ok` and `database.connected: true`. A missing or unreachable Atlas configuration returns HTTP 503 with a safe, credential-free explanation.
+
+## Phase 2 PDF ingestion
+
+`POST /api/papers/upload` accepts exactly one `file` form field. The backend streams it to a temporary file in bounded chunks, caps it at 20 MB, checks the filename, MIME type, `%PDF-` signature, PDF structure, password status, and extractable text. Temporary source files are deleted after processing.
+
+The duplicate policy is SHA-256 based: uploading an already processed PDF returns HTTP `409 Conflict` and the existing `paper_id`; no duplicate chunks are inserted. Failed MongoDB writes are compensated by deleting the incomplete paper/chunks where possible, and no `processed` status is written before chunk insertion succeeds.
+
+Text chunks default to 1,200 characters with a 200-character overlap, never cross page boundaries, and retain 1-based PDF page numbers. Configure these values with `PDF_CHUNK_SIZE` and `PDF_CHUNK_OVERLAP`; overlap must be smaller than chunk size.
+
+Test a PDF through the interactive API page after starting the server: open `http://127.0.0.1:8000/docs`, expand **POST /api/papers/upload**, select a text-based PDF smaller than 20 MB, and execute. Use `GET /api/papers/{paper_id}` with the returned ID to retrieve stored metadata. `GET /api/papers` lists recent uploads.
+
+To inspect Atlas after a successful upload, open the database named by `MONGODB_DATABASE`; inspect the `papers` and `paper_chunks` collections. Run `python scripts/initialize_database.py` once after configuring Atlas to create the indexes, including the unique SHA-256 and `(paper_id, chunk_index)` indexes.
+
+Run the local tests with:
+
+```powershell
+python -m pytest -q
+```
 
 ## Frontend connection
 

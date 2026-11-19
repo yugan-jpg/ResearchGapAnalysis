@@ -4,7 +4,11 @@
  */
 export const API_CONFIG = {
   baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000',
-  endpoints: { papers: '/api/papers', analysis: '/api/analysis' },
+  endpoints: {
+    papers: '/api/papers',
+    paperUpload: '/api/papers/upload',
+    analysis: '/api/analysis',
+  },
   timeoutMs: 30_000,
 };
 

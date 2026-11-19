@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_CONFIG } from './config/api';
 import { listPapers, submitAnalysis, uploadPapers } from './services/apiClient';
 import { exampleAnalysis, examplePapers } from './mocks/exampleResponses';
@@ -31,23 +31,37 @@ export default function App() {
   const [alert, setAlert] = useState(null);
   const [citation, setCitation] = useState(null);
   const [isExample, setIsExample] = useState(false);
+  const hasLoadedLibrary = useRef(false);
 
   const refreshLibrary = async () => {
     setLoadingPapers(true); setAlert(null);
     try { setPapers(await listPapers()); setIsExample(false); } catch (error) { setAlert({ kind: 'error', text: error.message }); } finally { setLoadingPapers(false); }
   };
 
+  useEffect(() => {
+    if (hasLoadedLibrary.current) return;
+    hasLoadedLibrary.current = true;
+    refreshLibrary();
+  }, []);
+
   const chooseFiles = async (event) => {
     const allFiles = [...event.target.files]; event.target.value = '';
     const valid = allFiles.filter(isPdf); const invalid = allFiles.filter((file) => !isPdf(file));
-    if (invalid.length) setAlert({ kind: 'error', text: `${invalid.map((file) => file.name).join(', ')} is not a PDF and was not uploaded.` });
+    const invalidMessage = invalid.length ? `${invalid.map((file) => file.name).join(', ')} is not a PDF and was not uploaded.` : '';
+    if (invalidMessage) setAlert({ kind: 'error', text: invalidMessage });
     if (!valid.length) return;
-    setUploading(true); setProgress(0); setAlert(null);
+    setUploading(true); setProgress(0); if (!invalidMessage) setAlert(null);
     try {
-      const uploaded = await uploadPapers(valid, setProgress);
-      setPapers((current) => [...uploaded, ...current.filter((old) => !uploaded.some((next) => next.id && next.id === old.id))]);
+      const { papers: uploaded, failures } = await uploadPapers(valid, setProgress, (paper) => {
+        setPapers((current) => [paper, ...current.filter((old) => old.id !== paper.id)]);
+      });
       setIsExample(false);
-      setAlert({ kind: 'success', text: `${valid.length} paper${valid.length === 1 ? ' was' : 's were'} accepted. Processing status will update when the backend reports it.` });
+      if (failures.length) {
+        const failedNames = failures.map((failure) => `${failure.filename}: ${failure.error.message}`).join(' ');
+        setAlert({ kind: 'error', text: `${invalidMessage ? `${invalidMessage} ` : ''}${uploaded.length} uploaded; ${failures.length} failed. ${failedNames}` });
+      } else {
+        setAlert({ kind: invalidMessage ? 'error' : 'success', text: `${invalidMessage ? `${invalidMessage} ` : ''}${uploaded.length} paper${uploaded.length === 1 ? ' was' : 's were'} processed successfully.` });
+      }
     } catch (error) { setAlert({ kind: 'error', text: error.message }); } finally { setUploading(false); }
   };
 

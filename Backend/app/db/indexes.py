@@ -11,6 +11,7 @@ COLLECTIONS = (
     "papers",
     "document_chunks",
     "paper_chunks",
+    "research_claims",
     "processing_jobs",
     "claims",
     "contradictions",
@@ -42,6 +43,13 @@ def initialize_database(database: Database) -> dict[str, object]:
     database.paper_chunks.create_index([("chunk_id", ASCENDING)], name="paper_chunk_id", unique=True)
     database.paper_chunks.create_index([("paper_id", ASCENDING), ("chunk_index", ASCENDING)], name="paper_chunk_position", unique=True)
     database.paper_chunks.create_index([("embedding_status", ASCENDING), ("paper_id", ASCENDING)], name="paper_chunk_embedding_status")
+    database.paper_chunks.create_index([("claim_extraction_status", ASCENDING), ("paper_id", ASCENDING)], name="paper_chunk_claim_status")
+    database.research_claims.create_index([("claim_id", ASCENDING)], name="research_claim_id", unique=True)
+    database.research_claims.create_index([("claim_hash", ASCENDING)], name="research_claim_hash", unique=True)
+    database.research_claims.create_index([("claim_content_hash", ASCENDING), ("paper_id", ASCENDING)], name="research_claim_content_hash")
+    database.research_claims.create_index([("verification_cache_key", ASCENDING)], name="research_claim_verification_cache")
+    database.research_claims.create_index([("verification_status", ASCENDING), ("paper_id", ASCENDING)], name="research_claim_verification_status")
+    database.research_claims.create_index([("paper_id", ASCENDING), ("chunk_id", ASCENDING), ("created_at", DESCENDING)], name="research_claim_paper_chunk")
     database.processing_jobs.create_index([("paper_id", ASCENDING), ("created_at", DESCENDING)], name="job_paper_created")
     database.processing_jobs.create_index([("status", ASCENDING), ("updated_at", DESCENDING)], name="job_status_updated")
     database.claims.create_index([("paper_id", ASCENDING), ("created_at", DESCENDING)], name="claim_paper_created")

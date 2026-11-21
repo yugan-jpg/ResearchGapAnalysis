@@ -43,6 +43,7 @@ class PaperRepository:
                 "chunk_index": chunk.chunk_index,
                 "page_number": chunk.page_number,
                 "text": chunk.text,
+                "embedding_status": "pending",
                 "created_at": created_at,
             }
             for chunk in chunks

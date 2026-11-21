@@ -1,6 +1,6 @@
-# Phase 1 — Backend foundation
+# Scientific Literature Gap Discovery backend
 
-Phase 2 adds text-based scientific PDF ingestion to the existing FastAPI foundation. It validates one upload at a time, extracts per-page text with PyMuPDF, creates page-aware text chunks, and stores metadata and chunks in MongoDB Atlas. It does **not** call an LLM, generate embeddings, run vector search, or perform research-gap analysis.
+Phase 3 adds local MiniLM embeddings and MongoDB Atlas Vector Search to the existing FastAPI/PDF-ingestion foundation. It does **not** call an LLM or perform research-gap analysis.
 
 ## Structure
 
@@ -14,9 +14,12 @@ Backend/
 │   ├── core/config.py             # Environment variables
 │   ├── api/routes/health.py       # GET /api/health
 │   ├── api/routes/papers.py       # PDF upload, paper lookup, paper list
+│   ├── api/routes/embeddings.py   # Bounded, idempotent embedding backfill
+│   ├── api/routes/search.py       # Semantic chunk retrieval
 │   ├── db/mongodb.py              # Lazy PyMongo Atlas client
 │   ├── db/indexes.py              # Initial collections/indexes
 │   ├── modules/pdf_processing/    # Validation, extraction, chunking, storage
+│   ├── modules/embeddings/        # Local encoder, backfill, vector repository
 │   ├── schemas/health.py
 │   └── modules/                   # Empty boundaries for later phases
 │       ├── pdf_processing/
@@ -29,6 +32,7 @@ Backend/
 │       └── research_gap_ranking/
 └── scripts/initialize_database.py
 └── tests/                          # Isolated PyMuPDF/mongomock tests
+└── atlas_vector_index.json          # Atlas Vector Search index definition
 ```
 
 ## Configuration
@@ -85,6 +89,66 @@ Run the local tests with:
 ```powershell
 python -m pytest -q
 ```
+
+## Phase 3 local embeddings and semantic retrieval
+
+The backend uses `sentence-transformers/all-MiniLM-L6-v2` locally on CPU. Its vectors have **384 dimensions** and are normalized before storage. The first embedding/backfill request downloads model weights from Hugging Face into the local user cache; this can take a few minutes on a first run. A download/load failure is returned as a safe `503` response.
+
+Phase 3 stores the following fields on each existing `paper_chunks` document without changing its PDF metadata: `embedding`, `embedding_model`, `embedding_dimensions`, `embedding_status`, and `embedded_at`.
+
+### Configuration
+
+The defaults in `.env.example` are suitable for this project:
+
+```dotenv
+EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_DIMENSIONS=384
+EMBEDDING_BATCH_SIZE=16
+EMBEDDING_DEVICE=cpu
+VECTOR_SEARCH_INDEX_NAME=paper_chunks_vector_index
+VECTOR_SEARCH_CANDIDATE_MULTIPLIER=10
+```
+
+On an 8 GB CPU-only computer, keep `EMBEDDING_DEVICE=cpu`. Reduce `EMBEDDING_BATCH_SIZE` to `8` if the first backfill puts too much pressure on memory.
+
+### Atlas Vector Search setup (manual)
+
+Atlas Vector Search indexes cannot be created by ordinary PyMongo collection-index commands. After running `python scripts/initialize_database.py`, create the vector index in Atlas:
+
+1. Open your Atlas deployment, then select **Search** / **Atlas Search** and choose **Create Search Index**.
+2. Choose the `MONGODB_DATABASE` database and the `paper_chunks` collection.
+3. Select the JSON editor, name the index `paper_chunks_vector_index` (or set `VECTOR_SEARCH_INDEX_NAME` to your chosen name), and paste the contents of `atlas_vector_index.json`.
+4. Create the index and wait until Atlas shows it as **Active** before calling semantic search.
+
+The definition uses `embedding` as a 384-dimensional `cosine` vector and defines `paper_id` as a future filter field.
+
+### Backfill existing or newly uploaded chunks
+
+Start the API, then run an intentionally bounded backfill. The first request may download the model:
+
+```powershell
+$backfill = @{ limit = 50 } | ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/api/embeddings/backfill `
+  -ContentType 'application/json' `
+  -Body $backfill
+```
+
+Repeat until `remaining_chunks` is `0`. To embed one paper only, include its `paper_id`; use `force: true` only to deliberately regenerate an already-current embedding. The normal path skips chunks already marked `ready` with the same model and dimensions, making it safe to repeat after partial failures.
+
+### Semantic search
+
+After backfill is complete and the Atlas index is active:
+
+```powershell
+$query = @{ query = 'limitations of external validation in forecasting models'; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/api/search/semantic `
+  -ContentType 'application/json' `
+  -Body $query
+```
+
+Results contain chunk text, parent `paper_id`, source page number, stable chunk index, and Atlas cosine similarity score. `top_k` accepts `1` through `50`; the API returns `503` with setup guidance if the vector index is absent or unavailable.
 
 ## Frontend connection
 

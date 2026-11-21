@@ -41,6 +41,7 @@ def initialize_database(database: Database) -> dict[str, object]:
     database.document_chunks.create_index([("paper_id", ASCENDING), ("chunk_index", ASCENDING)], name="chunk_paper_position", unique=True)
     database.paper_chunks.create_index([("chunk_id", ASCENDING)], name="paper_chunk_id", unique=True)
     database.paper_chunks.create_index([("paper_id", ASCENDING), ("chunk_index", ASCENDING)], name="paper_chunk_position", unique=True)
+    database.paper_chunks.create_index([("embedding_status", ASCENDING), ("paper_id", ASCENDING)], name="paper_chunk_embedding_status")
     database.processing_jobs.create_index([("paper_id", ASCENDING), ("created_at", DESCENDING)], name="job_paper_created")
     database.processing_jobs.create_index([("status", ASCENDING), ("updated_at", DESCENDING)], name="job_status_updated")
     database.claims.create_index([("paper_id", ASCENDING), ("created_at", DESCENDING)], name="claim_paper_created")

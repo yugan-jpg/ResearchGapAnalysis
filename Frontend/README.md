@@ -1,4 +1,4 @@
-# LitScope frontend
+# Research+ frontend
 
 Local React frontend for an **AI-Powered Scientific Literature Gap Discovery System**. It has no database implementation, PDF processing, vector retrieval, LLM integration, API keys, or backend secrets. The browser calls only the configured FastAPI HTTP service.
 

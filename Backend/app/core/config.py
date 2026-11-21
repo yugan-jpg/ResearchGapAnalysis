@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     pdf_max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1_024, le=100 * 1024 * 1024)
     pdf_chunk_size: int = Field(default=1_200, ge=200, le=5_000)
     pdf_chunk_overlap: int = Field(default=200, ge=0, le=2_500)
+    embedding_model_name: str = Field(default="sentence-transformers/all-MiniLM-L6-v2")
+    embedding_dimensions: int = Field(default=384, ge=1, le=4_096)
+    embedding_batch_size: int = Field(default=16, ge=1, le=128)
+    embedding_device: str = Field(default="cpu")
+    vector_search_index_name: str = Field(default="paper_chunks_vector_index")
+    vector_search_candidate_multiplier: int = Field(default=10, ge=1, le=100)
 
 
 @lru_cache

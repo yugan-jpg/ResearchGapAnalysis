@@ -9,6 +9,7 @@ class ClaimCategory(str, Enum):
     METHODOLOGY = "methodology"
     LIMITATION = "limitation"
     UNCERTAINTY = "uncertainty"
+    ASSUMPTION = "assumption"
     FUTURE_RESEARCH = "future_research"
 
 
@@ -48,7 +49,9 @@ class ClaimResponse(BaseModel):
     supporting_evidence: str
     created_at: datetime
     verification_status: str = "pending"
+    reverification_required: bool = False
     verification_verdict: VerificationVerdict | None = None
+    factual_verdict: VerificationVerdict | None = None
     evidence_supported: bool | None = None
     numerical_consistency: bool | None = None
     completeness: bool | None = None
@@ -56,9 +59,15 @@ class ClaimResponse(BaseModel):
     verification_explanation: str | None = None
     verifier_model: str | None = None
     verification_attempted_at: datetime | None = None
+    verification_failure_reason: str | None = None
     verified_at: datetime | None = None
     duplicate_of_claim_id: str | None = None
     duplicate_type: str | None = None
+    duplicate_similarity: float | None = None
+    duplicate_explanation: str | None = None
+    duplicate_candidate_id: str | None = None
+    duplicate_assessment: str | None = None
+    source_references: list[dict] = Field(default_factory=list)
 
 
 class ClaimExtractionResponse(BaseModel):
@@ -69,6 +78,16 @@ class ClaimExtractionResponse(BaseModel):
     rejected_claims: int
     remaining_chunks: int
     claims: list[ClaimResponse]
+    generated_claims: int = 0
+    stored_claims: int = 0
+    extraction_rejections: int = 0
+    exact_duplicates_skipped: int = 0
+    semantic_duplicates_flagged: int = 0
+    partial_overlaps_flagged: int = 0
+    verification_accepted: int = 0
+    verification_review: int = 0
+    verification_rejected: int = 0
+    verification_unavailable: int = 0
 
 
 class ClaimListResponse(BaseModel):

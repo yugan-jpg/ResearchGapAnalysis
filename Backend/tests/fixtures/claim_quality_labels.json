@@ -1,0 +1,16 @@
+{
+  "description": "Small synthetic, manually assigned labels for development; not an independently reviewed scientific benchmark.",
+  "claims": [
+    {"id":"valid", "source":"In 2024, 20 participants received 5 mg daily.", "claim":"In 2024, 20 participants received 5 mg daily.", "extraction_expected":true, "verification_expected":"accepted"},
+    {"id":"unsupported", "source":"The sample included 20 participants.", "claim":"The sample included 200 participants.", "extraction_expected":false, "verification_expected":"rejected"},
+    {"id":"truncated", "source":"Blood pressure fell in the intervention group.", "claim":"Blood pressure fell in the", "extraction_expected":false, "verification_expected":"review"},
+    {"id":"source_counts", "source":"A total of 1146 samples were collected: 321, 825, and 155.", "claim":"The source reports 1146 samples.", "extraction_expected":true, "verification_expected":"review"}
+  ],
+  "pairs": [
+    {"id":"exact", "left":"Blood pressure fell by 5 mmHg.", "right":"Blood pressure fell by 5 mmHg", "relationship":"exact"},
+    {"id":"semantic", "left":"The intervention reduced blood pressure.", "right":"Blood pressure decreased after the intervention.", "relationship":"semantic"},
+    {"id":"partial", "left":"Blood pressure and heart rate decreased.", "right":"Blood pressure decreased.", "relationship":"partial_overlap"},
+    {"id":"distinct_population", "left":"Blood pressure fell among adults.", "right":"Blood pressure fell among children.", "relationship":"related_distinct"},
+    {"id":"opposite", "left":"Blood pressure increased.", "right":"Blood pressure decreased.", "relationship":"related_distinct"}
+  ]
+}

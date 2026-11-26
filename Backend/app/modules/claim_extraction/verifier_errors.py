@@ -1,25 +1,29 @@
 from app.modules.claim_extraction.errors import ClaimExtractionError
 
 
-class GeminiVerificationError(ClaimExtractionError):
-    """Base error for the secondary Gemini verification provider."""
+class GroqVerificationError(ClaimExtractionError):
+    """Base error for the secondary Groq verification provider."""
 
 
-class GeminiConfigurationError(GeminiVerificationError):
-    """Gemini verification was enabled without complete configuration."""
+class GroqConfigurationError(GroqVerificationError):
+    """Groq verification was enabled without complete configuration."""
 
 
-class GeminiTimeoutError(GeminiVerificationError):
-    """Gemini did not respond before the configured timeout."""
+class GroqTimeoutError(GroqVerificationError):
+    """Groq did not respond before the configured timeout."""
 
 
-class GeminiRateLimitError(GeminiVerificationError):
-    """Gemini declined a request because of a rate limit."""
+class GroqRateLimitError(GroqVerificationError):
+    """Groq declined a request because of a rate limit."""
 
 
-class GeminiProviderError(GeminiVerificationError):
-    """Gemini was unavailable or returned an unusable provider response."""
+class GroqProviderError(GroqVerificationError):
+    """Groq was unavailable or returned an unusable provider response."""
 
 
-class GeminiResponseValidationError(GeminiVerificationError):
-    """Gemini did not return the required structured verification JSON."""
+class GroqAuthenticationError(GroqVerificationError):
+    """Groq rejected the configured credential or model access."""
+
+
+class GroqResponseValidationError(GroqVerificationError):
+    """Groq did not return the required structured verification JSON."""

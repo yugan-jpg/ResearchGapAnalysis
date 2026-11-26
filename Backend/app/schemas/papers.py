@@ -18,7 +18,7 @@ class PaperMetadataResponse(BaseModel):
     filename: str
     original_filename: str
     file_size: int
-    content_sha256: str
+    content_sha256: str | None = None
     total_pages: int
     pages_with_text: int
     total_chunks: int

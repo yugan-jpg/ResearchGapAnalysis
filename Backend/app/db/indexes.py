@@ -46,6 +46,7 @@ def initialize_database(database: Database) -> dict[str, object]:
     database.paper_chunks.create_index([("claim_extraction_status", ASCENDING), ("paper_id", ASCENDING)], name="paper_chunk_claim_status")
     database.research_claims.create_index([("claim_id", ASCENDING)], name="research_claim_id", unique=True)
     database.research_claims.create_index([("claim_hash", ASCENDING)], name="research_claim_hash", unique=True)
+    database.research_claims.create_index([("normalized_claim_hash", ASCENDING)], name="research_claim_normalized_unique", unique=True, sparse=True)
     database.research_claims.create_index([("claim_content_hash", ASCENDING), ("paper_id", ASCENDING)], name="research_claim_content_hash")
     database.research_claims.create_index([("verification_cache_key", ASCENDING)], name="research_claim_verification_cache")
     database.research_claims.create_index([("verification_status", ASCENDING), ("paper_id", ASCENDING)], name="research_claim_verification_status")

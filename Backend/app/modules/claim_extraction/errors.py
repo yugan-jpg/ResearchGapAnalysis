@@ -18,6 +18,10 @@ class LLMProviderError(ClaimExtractionError):
     """The hosted LLM provider returned an unavailable or invalid response."""
 
 
+class LLMAuthenticationError(LLMProviderError):
+    """The provider rejected authentication or model access."""
+
+
 class ClaimResponseValidationError(ClaimExtractionError):
     """The LLM response could not be parsed into the required claim schema."""
 

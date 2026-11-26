@@ -2,46 +2,49 @@ import json
 
 import mongomock
 import pytest
+import httpx
 
 from app.core.config import Settings
-from app.modules.claim_extraction.gemini_verifier import (
-    GeminiClaimVerifier,
+from app.modules.claim_extraction.groq_verifier import (
+    GroqClaimVerifier,
     VerificationInput,
     VerificationOutcome,
 )
 from app.modules.claim_extraction.repository import ClaimRepository
 from app.modules.claim_extraction.service import ClaimExtractionService
 from app.modules.claim_extraction.verifier_errors import (
-    GeminiConfigurationError,
-    GeminiProviderError,
-    GeminiRateLimitError,
-    GeminiResponseValidationError,
-    GeminiTimeoutError,
+    GroqConfigurationError,
+    GroqProviderError,
+    GroqRateLimitError,
+    GroqResponseValidationError,
+    GroqTimeoutError,
 )
 from app.schemas.claims import ClaimCategory, ExtractedClaim, LLMClaimPayload, VerificationVerdict
 
 
-class FakeGeminiResponse:
-    def __init__(self, text: str) -> None:
+class FakeGroqResponse:
+    def __init__(self, text: str, status_code: int = 200) -> None:
         self.text = text
+        self.status_code = status_code
+        self.headers = {}
+
+    def json(self):
+        return {"choices": [{"message": {"content": self.text}}]}
 
 
-class FakeGeminiModels:
+class FakeGroqClient:
     def __init__(self, responses) -> None:
         self.responses = list(responses)
         self.calls = []
 
-    def generate_content(self, **kwargs):
-        self.calls.append(kwargs)
+    def post(self, url, **kwargs):
+        self.calls.append({"url": url, **kwargs})
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return FakeGeminiResponse(response)
-
-
-class FakeGeminiClient:
-    def __init__(self, responses) -> None:
-        self.models = FakeGeminiModels(responses)
+        if isinstance(response, int):
+            return FakeGroqResponse("", response)
+        return FakeGroqResponse(response)
 
 
 class FakeClaimLLM:
@@ -69,10 +72,11 @@ class RateLimitError(Exception):
 
 def _settings(**overrides) -> Settings:
     values = {
-        "gemini_api_key": "test-gemini-key",
-        "gemini_model_name": "gemini-2.5-flash",
+        "llm_api_key": "test-key",
+        "llm_api_url": "https://api.groq.test/openai/v1/chat/completions",
+        "verifier_model_name": "openai/gpt-oss-120b",
         "verifier_enabled": True,
-        "gemini_max_retries": 0,
+        "verifier_max_retries": 0,
         "verifier_batch_size": 3,
         "verifier_comparison_limit": 5,
     }
@@ -135,39 +139,77 @@ def _database_with_source_chunks():
     return database
 
 
-def test_gemini_verifier_accepts_valid_structured_batch() -> None:
-    client = FakeGeminiClient([_verification_json()])
-    outcomes = GeminiClaimVerifier(_settings(), client=client, sleep=lambda _: None).verify_batch([_input()])
+def test_groq_verifier_accepts_valid_structured_batch() -> None:
+    client = FakeGroqClient([_verification_json()])
+    outcomes = GroqClaimVerifier(_settings(), client=client, sleep=lambda _: None).verify_batch([_input()])
 
     assert outcomes["claim-1"].status == "accepted"
     assert outcomes["claim-1"].verdict is VerificationVerdict.ACCEPTED
-    assert client.models.calls[0]["model"] == "gemini-2.5-flash"
-    assert len(client.models.calls) == 1
+    assert client.calls[0]["json"]["model"] == "openai/gpt-oss-120b"
+    assert client.calls[0]["url"] == "https://api.groq.test/openai/v1/chat/completions"
+    assert client.calls[0]["headers"]["Authorization"] == "Bearer test-key"
+    assert client.calls[0]["timeout"] == 60
+    assert len(client.calls) == 1
 
 
-def test_gemini_verifier_rejects_malformed_or_unknown_claim_json() -> None:
-    malformed = GeminiClaimVerifier(_settings(), client=FakeGeminiClient(["not-json"]), sleep=lambda _: None)
-    with pytest.raises(GeminiResponseValidationError):
+def test_duplicate_candidates_include_same_evidence_exclude_current_claim_and_flag_paraphrases() -> None:
+    db = _database_with_source_chunks()
+    evidence = "Samples were genotyped using SpotMalaria and assessed for resistance."
+    db.research_claims.insert_many([
+        {"paper_id": "paper-1", "claim_id": "old", "chunk_id": "chunk-1",
+         "claim_text": "Samples were genotyped using SpotMalaria.", "category": "methodology",
+         "supporting_evidence": evidence},
+        {"paper_id": "paper-1", "claim_id": "self", "chunk_id": "chunk-1",
+         "claim_text": "SpotMalaria genotyped samples.", "category": "methodology",
+         "supporting_evidence": evidence},
+    ])
+    claim = ExtractedClaim(claim_text="SpotMalaria genotyped samples.", category="methodology", supporting_evidence=evidence)
+    candidates = ClaimRepository(db).find_duplicate_candidates("paper-1", claim, 5, exclude_claim_id="self")
+    assert [candidate["claim_id"] for candidate in candidates] == ["old"]
+    item = _input()
+    from dataclasses import replace
+    item = replace(item, claim_text=claim.claim_text, supporting_evidence=evidence, comparison_candidates=tuple(candidates))
+    accepted = VerificationOutcome(status="accepted", verdict=VerificationVerdict.ACCEPTED, evidence_supported=True,
+                                   numerical_consistency=True, completeness=True, category_correct=True)
+    review = ClaimExtractionService._apply_rule_safeguards(item, accepted)
+    assert review.status == "review"
+    assert review.duplicate_of_claim_id == "old"
+    assert "possible paraphrase" in review.duplicate_explanation
+
+
+def test_shared_evidence_alone_does_not_mark_distinct_claims_duplicate() -> None:
+    from dataclasses import replace
+    item = replace(_input(), claim_text="Samples were collected in Cambodia.", supporting_evidence="Same passage.",
+                   comparison_candidates=({"claim_id": "x", "claim_text": "Sequencing used SpotMalaria.",
+                                           "supporting_evidence": "Same passage."},))
+    accepted = VerificationOutcome(status="accepted", verdict=VerificationVerdict.ACCEPTED, evidence_supported=True,
+                                   numerical_consistency=True, completeness=True, category_correct=True)
+    assert ClaimExtractionService._apply_rule_safeguards(item, accepted).status == "accepted"
+
+
+def test_groq_verifier_rejects_malformed_or_unknown_claim_json() -> None:
+    malformed = GroqClaimVerifier(_settings(), client=FakeGroqClient(["not-json"]), sleep=lambda _: None)
+    with pytest.raises(GroqResponseValidationError):
         malformed.verify_batch([_input()])
 
-    unknown = GeminiClaimVerifier(
-        _settings(), client=FakeGeminiClient([_verification_json(claim_id="other-claim")]), sleep=lambda _: None
+    unknown = GroqClaimVerifier(
+        _settings(), client=FakeGroqClient([_verification_json(claim_id="other-claim")]), sleep=lambda _: None
     )
-    with pytest.raises(GeminiResponseValidationError):
+    with pytest.raises(GroqResponseValidationError):
         unknown.verify_batch([_input()])
 
 
-def test_gemini_verifier_handles_rate_limits_timeouts_and_missing_config() -> None:
-    with pytest.raises(GeminiRateLimitError):
-        GeminiClaimVerifier(
-            _settings(), client=FakeGeminiClient([RateLimitError("rate limited")]), sleep=lambda _: None
+def test_groq_verifier_handles_rate_limits_timeouts_and_missing_config() -> None:
+    with pytest.raises(GroqRateLimitError):
+        GroqClaimVerifier(
+            _settings(), client=FakeGroqClient([429]), sleep=lambda _: None
         ).verify_batch([_input()])
-    with pytest.raises(GeminiTimeoutError):
-        GeminiClaimVerifier(
-            _settings(), client=FakeGeminiClient([TimeoutError("timed out")]), sleep=lambda _: None
+    with pytest.raises(GroqTimeoutError):
+        GroqClaimVerifier(
+            _settings(), client=FakeGroqClient([httpx.ReadTimeout("timed out")]), sleep=lambda _: None
         ).verify_batch([_input()])
-    with pytest.raises(GeminiConfigurationError):
-        GeminiClaimVerifier(_settings(gemini_api_key=""), client=FakeGeminiClient([])).verify_batch([_input()])
+    with pytest.raises(GroqConfigurationError):
+        GroqClaimVerifier(_settings(llm_api_key=""), client=FakeGroqClient([])).verify_batch([_input()])
 
 
 def test_service_marks_rejected_and_incomplete_claims_without_deleting_them() -> None:
@@ -187,20 +229,21 @@ def test_service_marks_rejected_and_incomplete_claims_without_deleting_them() ->
             completeness=True,
             category_correct=True,
             explanation="Supported.",
-            verifier_model="gemini-2.5-flash",
+            verifier_model="openai/gpt-oss-120b",
         ),
     )
     result = ClaimExtractionService(
         ClaimRepository(database), FakeClaimLLM([grounded]), "groq-gpt-oss-120b", verifier
     ).extract("paper-1", max_chunks=1)
 
-    assert result.accepted_claims == 1
-    assert result.claims[0].verification_status == "review"
-    assert result.claims[0].completeness is False
-    assert database.research_claims.count_documents({}) == 1
+    assert result.accepted_claims == 0
+    assert result.extraction_rejections == 1
+    assert database.research_claims.count_documents({}) == 0
+
+    grounded = grounded.model_copy(update={"claim_text": "The intervention improved validation accuracy by 12%."})
 
     rejected_verifier = StubVerifier(
-        _settings(gemini_model_name="gemini-test-rejected"),
+        _settings(verifier_model_name="other-verifier-model"),
         lambda _item: VerificationOutcome(
             status="rejected",
             verdict=VerificationVerdict.REJECTED,
@@ -209,7 +252,7 @@ def test_service_marks_rejected_and_incomplete_claims_without_deleting_them() ->
             completeness=True,
             category_correct=True,
             explanation="The claim extends beyond the supplied evidence.",
-            verifier_model="gemini-2.5-flash",
+            verifier_model="openai/gpt-oss-120b",
         ),
     )
     result = ClaimExtractionService(
@@ -219,7 +262,7 @@ def test_service_marks_rejected_and_incomplete_claims_without_deleting_them() ->
     assert database.research_claims.count_documents({}) == 1
 
 
-def test_cross_chunk_duplicate_is_retained_for_review_and_cache_skips_extra_call() -> None:
+def test_cross_chunk_duplicate_is_retained_and_new_comparison_invalidates_cache() -> None:
     database = _database_with_source_chunks()
     existing = ExtractedClaim(
         claim_text="The intervention improved validation accuracy by 12%.",
@@ -246,7 +289,7 @@ def test_cross_chunk_duplicate_is_retained_for_review_and_cache_skips_extra_call
             completeness=True,
             category_correct=True,
             explanation="Potential duplicate retained for review.",
-            verifier_model="gemini-2.5-flash",
+            verifier_model="openai/gpt-oss-120b",
             duplicate_of_claim_id=duplicate_id,
             duplicate_type="semantic",
         )
@@ -260,13 +303,13 @@ def test_cross_chunk_duplicate_is_retained_for_review_and_cache_skips_extra_call
     assert semantic.verification_status == "review"
     assert semantic.duplicate_type == "semantic"
     assert database.research_claims.count_documents({}) == 2
-    # The second pass reuses the verifier metadata keyed by unchanged claim and
-    # source evidence rather than making a second Gemini request.
-    assert len(verifier.calls) == 1
+    # The stored claim itself is now among the candidates for this newly
+    # extracted claim, so the comparison set changes and the cache is stale.
+    assert len(verifier.calls) == 2
     assert second.duplicate_claims == 1
 
 
-def test_exact_cross_chunk_match_is_linked_not_deleted() -> None:
+def test_exact_cross_chunk_match_preserves_source_reference() -> None:
     database = _database_with_source_chunks()
     repository = ClaimRepository(database)
     chunks = repository.get_chunks("paper-1", "unused", True, 2)
@@ -278,12 +321,10 @@ def test_exact_cross_chunk_match_is_linked_not_deleted() -> None:
 
     repository.store_claims(chunks[0], [exact], "old-model")
     repository.store_claims(chunks[1], [exact], "old-model")
-    second = database.research_claims.find_one({"chunk_id": "chunk-2"})
+    stored = database.research_claims.find_one({"chunk_id": "chunk-1"})
 
-    assert database.research_claims.count_documents({}) == 2
-    assert second["duplicate_type"] == "exact"
-    assert second["verification_status"] == "review"
-    assert second["duplicate_of_claim_id"]
+    assert database.research_claims.count_documents({}) == 1
+    assert {ref["chunk_id"] for ref in stored["source_references"]} == {"chunk-1", "chunk-2"}
 
 
 def test_verifier_failure_preserves_new_claim_as_unavailable() -> None:
@@ -298,7 +339,7 @@ def test_verifier_failure_preserves_new_claim_as_unavailable() -> None:
         settings = _settings()
 
         def verify_batch(self, _inputs):
-            raise GeminiProviderError("provider unavailable")
+            raise GroqProviderError("provider unavailable")
 
     result = ClaimExtractionService(
         ClaimRepository(database), FakeClaimLLM([grounded]), "groq-gpt-oss-120b", FailingVerifier()

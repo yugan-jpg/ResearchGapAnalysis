@@ -1,5 +1,8 @@
 import json
 import time
+import random
+import logging
+import math
 from typing import Any, Protocol
 
 import httpx
@@ -9,11 +12,15 @@ from app.core.config import Settings
 from app.modules.claim_extraction.errors import (
     ClaimResponseValidationError,
     LLMConfigurationError,
+    LLMAuthenticationError,
     LLMProviderError,
     LLMRateLimitError,
     LLMTimeoutError,
 )
 from app.schemas.claims import LLMClaimPayload
+from app.modules.claim_extraction.usage import usage_monitor
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class HttpClient(Protocol):
@@ -44,6 +51,11 @@ class QwenClaimClient:
                         "You are a scientific claim extraction assistant. Return only valid JSON. "
                         "Extract only statements directly supported by the supplied source chunk. "
                         "Do not infer, combine evidence, add conclusions, or paraphrase supporting evidence. "
+                        "Treat background literature as background, not the current study's findings. "
+                        "Extract complete atomic claims where possible. Preserve numbers, units, populations, "
+                        "locations, and study periods; do not fill in missing context. "
+                        "Choose a complete quotation with sufficient context where possible, retain uncertainty "
+                        "and do not turn an association into a causal conclusion. "
                         "Each supporting_evidence value must be an exact continuous quotation from the chunk."
                     ),
                 },
@@ -56,7 +68,7 @@ class QwenClaimClient:
                         "---\n\n"
                         f"Return a JSON object only: {{\"claims\": [...]}}. Return at most {self.settings.claim_extraction_max_claims} claims. "
                         "Every item must have claim_text, category, and supporting_evidence. "
-                        "category must be exactly one of: finding, methodology, limitation, uncertainty, future_research. "
+                        "category must be exactly one of: finding, methodology, limitation, uncertainty, assumption, future_research. "
                         "If the chunk has no clear supported claim, return {\"claims\": []}."
                     ),
                 },
@@ -71,42 +83,67 @@ class QwenClaimClient:
         key = self.settings.llm_api_key.get_secret_value()
         auth_value = f"{self.settings.llm_api_auth_prefix.strip()} {key}".strip()
         headers[self.settings.llm_api_auth_header] = auth_value
+        model = str(payload.get("model", self.settings.llm_model_name))
+        estimate = math.ceil(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) / 3) + self.settings.groq_estimated_output_tokens
 
         for attempt in range(self.settings.llm_max_retries + 1):
             try:
-                if self._http_client is not None:
-                    response = self._http_client.post(self.settings.llm_api_url, headers=headers, json=payload, timeout=self.settings.llm_timeout_seconds)
-                else:
-                    with httpx.Client(timeout=self.settings.llm_timeout_seconds) as client:
-                        response = client.post(self.settings.llm_api_url, headers=headers, json=payload)
+                with usage_monitor.slot(model, estimate, self.settings):
+                    try:
+                        if self._http_client is not None:
+                            response = self._http_client.post(self.settings.llm_api_url, headers=headers, json=payload, timeout=self.settings.llm_timeout_seconds)
+                        else:
+                            with httpx.Client(timeout=self.settings.llm_timeout_seconds) as client:
+                                response = client.post(self.settings.llm_api_url, headers=headers, json=payload)
+                    except httpx.HTTPError:
+                        usage_monitor.observe(model, {}, None, estimate)
+                        raise
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        body = None
+                    usage_monitor.observe(model, response.headers, body.get("usage") if isinstance(body, dict) else None, estimate)
+            except ValueError as error:
+                raise LLMRateLimitError(str(error)) from error
             except httpx.TimeoutException as error:
                 if attempt < self.settings.llm_max_retries:
-                    self._sleep(2**attempt)
+                    logger.warning("Groq model=%s timed out; retry %d of %d", model, attempt + 1, self.settings.llm_max_retries)
+                    self._sleep(2**attempt + random.uniform(0, 0.5))
                     continue
                 raise LLMTimeoutError("The claim extraction provider timed out. Please try again.") from error
             except httpx.HTTPError as error:
                 if attempt < self.settings.llm_max_retries:
-                    self._sleep(2**attempt)
+                    logger.warning("Groq model=%s transport unavailable; retry %d of %d", model, attempt + 1, self.settings.llm_max_retries)
+                    self._sleep(2**attempt + random.uniform(0, 0.5))
                     continue
                 raise LLMProviderError("The claim extraction provider could not be reached.") from error
 
             if response.status_code == 429:
                 if attempt < self.settings.llm_max_retries:
+                    logger.warning("Groq model=%s rate limited; retry %d of %d", model, attempt + 1, self.settings.llm_max_retries)
                     retry_after = response.headers.get("retry-after")
-                    self._sleep(float(retry_after) if retry_after and retry_after.isdigit() else 2**attempt)
+                    try:
+                        delay = float(retry_after) if retry_after else 2**attempt
+                    except ValueError:
+                        delay = 2**attempt
+                    if delay > self.settings.groq_max_throttle_wait_seconds:
+                        raise LLMRateLimitError("The provider requested a retry later. Please try again later.")
+                    self._sleep(max(0, delay) + random.uniform(0, 0.5))
                     continue
                 raise LLMRateLimitError("The claim extraction provider is rate limiting requests. Please try again later.")
             if response.status_code >= 500:
                 if attempt < self.settings.llm_max_retries:
-                    self._sleep(2**attempt)
+                    logger.warning("Groq model=%s provider unavailable; retry %d of %d", model, attempt + 1, self.settings.llm_max_retries)
+                    self._sleep(2**attempt + random.uniform(0, 0.5))
                     continue
                 raise LLMProviderError("The claim extraction provider is unavailable. Please try again later.")
+            if response.status_code in (401, 403):
+                raise LLMAuthenticationError("The provider rejected authentication or model access.")
             if response.status_code >= 400:
                 raise LLMProviderError("The claim extraction provider rejected the request. Check its endpoint, model, and credentials.")
-            try:
-                return response.json()
-            except (ValueError, json.JSONDecodeError) as error:
-                raise ClaimResponseValidationError("The claim extraction provider returned invalid JSON.") from error
+            if not isinstance(body, dict):
+                raise ClaimResponseValidationError("The claim extraction provider returned invalid JSON.")
+            return body
 
         raise LLMProviderError("The claim extraction provider could not complete the request.")
 

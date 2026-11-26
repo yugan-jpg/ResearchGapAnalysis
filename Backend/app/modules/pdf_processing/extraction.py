@@ -47,6 +47,61 @@ def clean_page_text(raw_text: str) -> str:
     return "\n\n".join(paragraphs)
 
 
+_SUPER_DIGITS = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
+
+
+def _layout_text(page: pymupdf.Page) -> str:
+    """Read column blocks top-to-bottom, keeping full-width headings in place.
+
+    PDF geometry is heuristic: blocks crossing the midpoint separate horizontal
+    sections; within each section left and right column blocks are read in
+    order. Superscript digits stay distinguishable from the adjacent text.
+    """
+    blocks = []
+    for block in page.get_text("dict", sort=False)["blocks"]:
+        if block.get("type") != 0:
+            continue
+        lines = []
+        for line in block.get("lines", []):
+            parts = []
+            for span in line.get("spans", []):
+                value = span.get("text", "")
+                if span.get("flags", 0) & 1:
+                    value = value.translate(_SUPER_DIGITS)
+                parts.append(value)
+            if parts:
+                lines.append("".join(parts))
+        text = "\n".join(lines).strip()
+        if text:
+            blocks.append((tuple(block["bbox"]), text))
+
+    mid = (page.rect.x0 + page.rect.x1) / 2
+    gap = page.rect.width * 0.015
+    spanning = [b for b in blocks if b[0][0] < mid - gap and b[0][2] > mid + gap and b[0][2] - b[0][0] > page.rect.width * 0.55]
+    columns = [b for b in blocks if b not in spanning]
+    spanning.sort(key=lambda b: (b[0][1], b[0][0]))
+    ordered = []
+    previous_y = float("-inf")
+    for boundary in spanning + [None]:
+        next_y = boundary[0][1] if boundary else float("inf")
+        band = [b for b in columns if previous_y <= (b[0][1] + b[0][3]) / 2 < next_y]
+        # Group horizontally overlapping blocks, allowing more than two
+        # columns; short indented paragraphs remain in their parent column.
+        groups = []
+        for block in sorted(band, key=lambda b: b[0][0]):
+            if not groups or block[0][0] > groups[-1][0] + gap:
+                groups.append([block[0][2], [block]])
+            else:
+                groups[-1][0] = max(groups[-1][0], block[0][2])
+                groups[-1][1].append(block)
+        for _, group in groups:
+            ordered.extend(sorted(group, key=lambda b: (b[0][1], b[0][0])))
+        if boundary:
+            ordered.append(boundary)
+            previous_y = next_y
+    return "\n\n".join(text for _, text in ordered)
+
+
 def _reliable_metadata(document: pymupdf.Document) -> dict[str, str]:
     metadata = document.metadata or {}
     result: dict[str, str] = {}
@@ -72,7 +127,7 @@ def extract_pdf(path: Path) -> ExtractionResult:
 
         pages: list[ExtractedPage] = []
         for index, page in enumerate(document, start=1):
-            text = clean_page_text(page.get_text("text", sort=True))
+            text = clean_page_text(_layout_text(page))
             if text:
                 pages.append(ExtractedPage(page_number=index, text=text))
 

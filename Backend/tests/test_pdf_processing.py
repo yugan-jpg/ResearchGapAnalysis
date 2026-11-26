@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import pymupdf
 
 from app.modules.pdf_processing.chunking import PageAwareChunker
 from app.modules.pdf_processing.errors import ChunkingError, InvalidPdfError, ScannedPdfError
@@ -17,6 +18,41 @@ def test_extracts_multiple_pages_and_preserves_page_numbers(tmp_path: Path, pdf_
     assert [page.page_number for page in result.pages] == [1, 2]
     assert "methods" in result.pages[0].text
     assert result.pages_with_text == 2
+
+
+def test_two_columns_are_read_as_columns_and_single_column_stays_ordered(tmp_path: Path) -> None:
+    document = pymupdf.open()
+    page = document.new_page(width=600, height=800)
+    page.insert_text((40, 40), "FULL WIDTH HEADER")
+    page.insert_text((40, 100), "LEFT FIRST paragraph.")
+    page.insert_text((40, 160), "LEFT SECOND paragraph.")
+    page.insert_text((320, 100), "RIGHT FIRST paragraph.")
+    page.insert_text((320, 160), "RIGHT SECOND paragraph.")
+    page = document.new_page(width=600, height=800)
+    page.insert_text((40, 100), "Single first paragraph.")
+    page.insert_text((40, 160), "Single second paragraph.")
+    page = document.new_page(width=600, height=800)
+    for x, label in ((40, "COLUMN ONE"), (230, "COLUMN TWO"), (420, "COLUMN THREE")):
+        page.insert_text((x, 100), label + " FIRST")
+        page.insert_text((x, 160), label + " SECOND")
+    path = tmp_path / "columns.pdf"
+    document.save(path)
+    document.close()
+    pages = extract_pdf(path).pages
+    text = pages[0].text
+    assert text.index("LEFT FIRST") < text.index("LEFT SECOND") < text.index("RIGHT FIRST") < text.index("RIGHT SECOND")
+    assert pages[1].text.index("Single first") < pages[1].text.index("Single second")
+    text = pages[2].text
+    assert text.index("COLUMN ONE SECOND") < text.index("COLUMN TWO FIRST") < text.index("COLUMN TWO SECOND") < text.index("COLUMN THREE FIRST")
+
+
+def test_mekong_page_two_column_reading_order_when_available() -> None:
+    path = Path(r"C:\Users\ASUS\Documents\ChatGPT\Bio Malaria papers\Genetic surveillance of Plasmodium falciparum populations following treatment policy revisions in the Greater Mekong Subregion.pdf")
+    if not path.exists():
+        pytest.skip("Original Mekong PDF is not available on this machine.")
+    text = extract_pdf(path).pages[1].text
+    assert text.index("molecular markers of resistance") < text.index("Between January 2017") < text.index("Cambodia starting in 2018")
+    assert "2017¹⁶–¹⁹" in text
 
 
 def test_cleaning_preserves_scientific_unicode() -> None:

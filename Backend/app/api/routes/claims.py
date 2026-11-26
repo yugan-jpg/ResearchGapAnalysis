@@ -17,7 +17,8 @@ from app.modules.claim_extraction.errors import (
     PaperNotFoundError,
 )
 from app.modules.claim_extraction.llm_client import QwenClaimClient
-from app.modules.claim_extraction.gemini_verifier import GeminiClaimVerifier
+from app.modules.claim_extraction.groq_verifier import GroqClaimVerifier
+from app.modules.embeddings.service import get_embedding_service
 from app.modules.claim_extraction.repository import ClaimRepository
 from app.modules.claim_extraction.service import ClaimExtractionService
 from app.schemas.claims import (
@@ -49,10 +50,10 @@ async def extract_claims(paper_id: str, request: ClaimExtractionRequest) -> Clai
     try:
         settings = get_settings()
         service = ClaimExtractionService(
-            repository=ClaimRepository(get_database()),
+            repository=ClaimRepository(get_database(), embedder=get_embedding_service() if settings.verifier_enabled else None),
             llm_client=QwenClaimClient(settings),
             model_name=settings.llm_model_name,
-            verifier=GeminiClaimVerifier(settings),
+            verifier=GroqClaimVerifier(settings),
         )
         result = await run_in_threadpool(service.extract, paper_id, request.max_chunks, request.force)
         return ClaimExtractionResponse(**result.__dict__)
@@ -86,14 +87,14 @@ async def extract_claims(paper_id: str, request: ClaimExtractionRequest) -> Clai
 async def verify_existing_claims(
     paper_id: str, request: ClaimVerificationRequest
 ) -> ClaimVerificationResponse:
-    """Add Gemini verification metadata to stored claims without re-extracting."""
+    """Add Groq verification metadata to stored claims without re-extracting."""
     try:
         settings = get_settings()
         service = ClaimExtractionService(
-            repository=ClaimRepository(get_database()),
+            repository=ClaimRepository(get_database(), embedder=get_embedding_service() if settings.verifier_enabled else None),
             llm_client=QwenClaimClient(settings),
             model_name=settings.llm_model_name,
-            verifier=GeminiClaimVerifier(settings),
+            verifier=GroqClaimVerifier(settings),
         )
         result = await run_in_threadpool(service.verify_existing, paper_id, request.limit, request.force)
         return ClaimVerificationResponse(**result.__dict__)

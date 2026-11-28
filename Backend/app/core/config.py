@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     embedding_device: str = Field(default="cpu")
     vector_search_index_name: str = Field(default="paper_chunks_vector_index")
     vector_search_candidate_multiplier: int = Field(default=10, ge=1, le=100)
+    comparison_min_similarity: float = Field(default=0.60, ge=0, le=1)
+    comparison_neighbors: int = Field(default=5, ge=1, le=20)
+    comparison_discovery_limit: int = Field(default=5, ge=1, le=25)
+    comparison_detection_limit: int = Field(default=2, ge=1, le=25)
 
 
 @lru_cache

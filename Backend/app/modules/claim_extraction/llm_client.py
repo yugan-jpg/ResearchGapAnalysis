@@ -39,6 +39,23 @@ class QwenClaimClient:
         self._http_client = http_client
         self._sleep = sleep
 
+    def structured_completion(self, messages: list[dict[str, str]], response_format: dict) -> str:
+        """Request a structured chat message using the shared monitored transport."""
+        self._validate_configuration()
+        body = self._request({
+            "model": self.settings.llm_model_name,
+            "temperature": 0,
+            "messages": messages,
+            "response_format": response_format,
+        })
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ClaimResponseValidationError("The provider returned no structured message.") from error
+        if not isinstance(content, str) or not content.strip():
+            raise ClaimResponseValidationError("The provider returned an empty structured message.")
+        return content
+
     def extract_claims(self, paper_id: str, chunk_id: str, page_number: int, chunk_text: str) -> LLMClaimPayload:
         self._validate_configuration()
         payload = {

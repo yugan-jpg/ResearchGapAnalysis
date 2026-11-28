@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
 from app.api.routes.claims import router as claims_router
+from app.api.routes.comparisons import router as comparisons_router
 from app.api.routes.embeddings import router as embeddings_router
 from app.api.routes.papers import router as papers_router
 from app.api.routes.search import router as search_router
@@ -39,6 +40,7 @@ app.include_router(papers_router, prefix=settings.api_prefix)
 app.include_router(embeddings_router, prefix=settings.api_prefix)
 app.include_router(search_router, prefix=settings.api_prefix)
 app.include_router(claims_router, prefix=settings.api_prefix)
+app.include_router(comparisons_router, prefix=settings.api_prefix)
 
 
 @app.get("/", tags=["system"], include_in_schema=False)

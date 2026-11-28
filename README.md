@@ -1,6 +1,6 @@
 # AI-Powered Scientific Literature Gap Discovery System
 
-A scientific literature analysis system using Retrieval-Augmented Generation (RAG), MongoDB Atlas, and LLM-powered scientific claim extraction and verification to identify research gaps.
+A research-intelligence application using Retrieval-Augmented Generation (RAG), MongoDB Atlas, and LLM-assisted scientific claim analysis. It compares evidence across papers and surfaces potential mismatch signals for further investigation. Research gap generation and validation remain future work.
 
 ## Tech Stack
 
@@ -24,6 +24,10 @@ A scientific literature analysis system using Retrieval-Augmented Generation (RA
 - Exact and semantic duplicate detection
 - Canonical claim selection and incomplete paraphrase resolution
 - Source provenance and verification audit history
+- Cross-paper claim comparison using cosine similarity and shared scientific terms
+- Trusted-claim selection and claim-aware candidate retrieval
+- Scientific relationship classification, contradiction detection and independent model assessment
+- Comparison queue with pagination, source references and duplicate pair prevention
 - API usage monitoring, automatic throttling and verification retries
 - Targeted re-verification and historical duplicate repair
 
@@ -35,7 +39,7 @@ From the `Backend` directory:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Configure `.env` with your MongoDB and Groq credentials.
@@ -45,6 +49,8 @@ Initialize MongoDB:
 ```powershell
 python scripts/initialize_database.py
 ```
+
+In MongoDB Atlas, create or update the `paper_chunks_vector_index` Vector Search index using [Backend/atlas_vector_index.json](Backend/atlas_vector_index.json). Wait until the index is ready. It uses 384-dimensional cosine vectors and filters for `paper_id`, `chunk_id`, `embedding_status`, `embedding_model`, and `embedding_dimensions`.
 
 Start the backend:
 
@@ -76,6 +82,15 @@ Both models use the same Groq API credentials.
 
 Additional MongoDB, embedding, verification and rate-limit settings are documented in `.env.example`.
 
+Optional comparison settings in `Backend/.env` control the minimum claim cosine, candidate limit and batch sizes:
+
+```dotenv
+COMPARISON_MIN_SIMILARITY=0.60
+COMPARISON_NEIGHBORS=5
+COMPARISON_DISCOVERY_LIMIT=5
+COMPARISON_DETECTION_LIMIT=2
+```
+
 Never commit your actual `.env` file.
 
 ## API Endpoints
@@ -91,6 +106,9 @@ Never commit your actual `.env` file.
 | POST | `/api/claims/extract/{paper_id}` | Extract and verify scientific claims |
 | POST | `/api/claims/verify/{paper_id}` | Verify existing claims |
 | GET | `/api/claims/{paper_id}` | Retrieve extracted claims |
+| POST | `/api/comparisons/similar` | Discover and queue cross-paper claim pairs |
+| POST | `/api/comparisons/detect` | Classify queued pairs with the configured models |
+| GET | `/api/comparisons` | List and filter stored comparisons |
 
 ## Testing
 
@@ -98,10 +116,7 @@ Never commit your actual `.env` file.
 python -m pytest -q
 ```
 
-Latest regression test results:
-
-- 110 passed
-- 1 skipped (optional live Groq test)
+The optional live Groq smoke test is disabled by default.
 
 ## RAG Workflow
 
@@ -124,9 +139,14 @@ Duplicate Resolution & Canonical Selection
       ↓
 Verified Scientific Claims
       ↓
+Cross-Paper Candidate Retrieval & Similarity Screening
+      ↓
+Qwen and GPT-OSS — Independent Relationship Assessments
+      ↓
+Evidence-Linked Comparisons & Potential Mismatch Signals
+      ↓
 Research Gap Analysis (Planned)
 ```
 
-
-
+Similarity and shared terms select candidates for review. Model assessments depend on the source context and are not proof of a scientific contradiction or research gap. See the [backend README](Backend/README.md) for the API workflow and limitations.
 

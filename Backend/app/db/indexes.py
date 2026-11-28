@@ -28,11 +28,7 @@ def _ensure_collection(database: Database, name: str) -> None:
 
 
 def initialize_database(database: Database) -> dict[str, object]:
-    """Create Phase 1 collections and standard indexes.
-
-    Atlas Vector Search indexes are intentionally deferred until an embedding
-    schema exists in a later phase.
-    """
+    """Create standard collection indexes. Configure the vector index separately in Atlas."""
     for name in COLLECTIONS:
         _ensure_collection(database, name)
 
@@ -55,6 +51,17 @@ def initialize_database(database: Database) -> dict[str, object]:
     database.processing_jobs.create_index([("status", ASCENDING), ("updated_at", DESCENDING)], name="job_status_updated")
     database.claims.create_index([("paper_id", ASCENDING), ("created_at", DESCENDING)], name="claim_paper_created")
     database.contradictions.create_index([("paper_ids", ASCENDING)], name="contradiction_papers")
+    database.contradictions.create_index(
+        [("paper_ids", ASCENDING), ("processing_status", ASCENDING), ("_id", ASCENDING)],
+        name="comparison_queue",
+    )
+    database.contradictions.create_index(
+        [("relationship", ASCENDING), ("mismatch_types", ASCENDING)], name="comparison_classification",
+    )
+    database.research_claims.create_index(
+        [("paper_id", ASCENDING), ("verification_status", ASCENDING), ("claim_id", ASCENDING)],
+        name="comparison_source_cursor",
+    )
     database.research_gaps.create_index([("status", ASCENDING), ("created_at", DESCENDING)], name="gap_status_created")
     database.analysis_runs.create_index([("created_at", DESCENDING)], name="analysis_created")
 

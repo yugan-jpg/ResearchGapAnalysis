@@ -80,6 +80,10 @@ class EmbeddingRepository:
         index_name: str,
         top_k: int,
         num_candidates: int,
+        *,
+        paper_id: str | None = None,
+        embedding_filter: dict[str, Any] | None = None,
+        chunk_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         pipeline = [
             {
@@ -103,6 +107,14 @@ class EmbeddingRepository:
                 }
             },
         ]
+        filters = dict(embedding_filter or {})
+        if paper_id is not None:
+            filters["paper_id"] = paper_id
+        if filters:
+            clauses = [{field: {"$eq": value}} for field, value in filters.items()]
+            if chunk_ids is not None:
+                clauses.append({"chunk_id": {"$in": chunk_ids}})
+            pipeline[0]["$vectorSearch"]["filter"] = clauses[0] if len(clauses) == 1 else {"$and": clauses}
         try:
             return list(self.database.paper_chunks.aggregate(pipeline))
         except (OperationFailure, PyMongoError, TypeError) as error:

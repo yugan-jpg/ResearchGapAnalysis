@@ -9,6 +9,10 @@
     {
       "type": "filter",
       "path": "paper_id"
-    }
+    },
+    {"type": "filter", "path": "embedding_status"},
+    {"type": "filter", "path": "embedding_model"},
+    {"type": "filter", "path": "embedding_dimensions"},
+    {"type": "filter", "path": "chunk_id"}
   ]
 }

@@ -1,1 +1,1 @@
-"""Reserved for future contradiction detection."""
+"""Evidence-grounded assessment and storage of cross-paper relationships."""

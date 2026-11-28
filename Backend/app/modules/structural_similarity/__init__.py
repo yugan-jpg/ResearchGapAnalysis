@@ -1,1 +1,1 @@
-"""Reserved for future structural similarity analysis."""
+"""Cross-paper candidate discovery using local embeddings and structural cues."""
